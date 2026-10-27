@@ -1,0 +1,16 @@
+{
+  "version": 6,
+  "configurePresets": [
+    { "name": "release", "binaryDir": "${sourceDir}/build/${presetName}", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" } },
+    { "name": "debug", "binaryDir": "${sourceDir}/build/${presetName}", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } }
+  ],
+  "buildPresets": [
+    { "name": "release", "configurePreset": "release", "configuration": "Release" },
+    { "name": "debug", "configurePreset": "debug", "configuration": "Debug" },
+    { "name": "run", "configurePreset": "release", "configuration": "Release", "targets": ["run"] }
+  ],
+  "testPresets": [{ "name": "release", "configurePreset": "release", "configuration": "Release" }],
+  "workflowPresets": [
+    { "name": "run", "steps": [{ "type": "configure", "name": "release" }, { "type": "build", "name": "run" }] }
+  ]
+}
