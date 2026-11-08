@@ -54,7 +54,7 @@ def normalize(img: torch.Tensor) -> torch.Tensor:
     return (img - m) / s
 
 
-MODEL_PATH = "model/unet.pt"  # under config.OUT
+MODEL_PATH = "work/model/unet.pt"  # under config.OUT
 
 
 def load() -> tuple[UNet, dict]:

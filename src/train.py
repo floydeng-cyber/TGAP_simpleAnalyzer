@@ -1,10 +1,10 @@
-"""Step 4: trains the U-Net on the classical masks that passed QC, pre- and post-etch images together.
+"""Step 3: trains the U-Net on the classical masks that passed QC, pre- and post-etch images together.
 
 Chip config.HOLDOUT_CHIP is held out to measure agreement with clean labels on unseen sites. Pre-etch
 images are few (about 160 vs 1600), so each batch is half pre-etch, half post-etch. Training runs on the
 CPU (about 1 s per step): this torch build's MPS backend fails on convolution backward on macOS 14.
 
-Writes OUT/model/unet.pt and OUT/model/train_log.csv.
+Writes OUT/work/model/unet.pt and OUT/work/model/train_log.csv.
 """
 
 import csv
@@ -17,7 +17,7 @@ import torch
 import torch.nn.functional as F
 
 import config
-from extract import read_sites
+from pairs import read_sites
 from labels import read_qc
 from unet import MODEL_PATH, UNet, normalize
 
@@ -34,7 +34,7 @@ def load_set() -> dict:
         if r["ok"] != "True":
             continue
         kind, name = r["kind"], r["image"]
-        img = tifffile.imread(config.OUT / "work/images" / kind / f"{name}.tif")
+        img = tifffile.imread(config.image(kind, name))
         mask = cv2.imread(str(config.OUT / "work/labels" / kind / f"{name}.png"), cv2.IMREAD_GRAYSCALE) > 0
         split = "val" if chip_of[(kind, name)] == config.HOLDOUT_CHIP else "train"
         data[split][kind].append((img, mask))
@@ -83,7 +83,7 @@ def main(steps: int = 2400) -> None:
     model = UNet(base=BASE)
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=1e-3, total_steps=steps, pct_start=0.1)
-    log = csv.writer(open(config.out("model/train_log.csv"), "w", newline=""))
+    log = csv.writer(open(config.out("work/model/train_log.csv"), "w", newline=""))
     log.writerow(["step", "loss", "val_iou_pre", "val_iou_post", "seconds"])
     t0, run = time.time(), 0.0
     for step in range(1, steps + 1):

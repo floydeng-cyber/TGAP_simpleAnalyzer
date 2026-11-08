@@ -1,4 +1,4 @@
-"""Step 3: labels for the U-Net. Classical segmentation of every image, then a QC of each mask.
+"""Step 2: labels for the U-Net. Classical segmentation of every image, then a QC of each mask.
 
 Segmentation gives the structure's footprint: everything inside the outer edge of its bright edge band,
 by the same rule for both kinds of image.
@@ -26,7 +26,7 @@ import tifffile
 from scipy import ndimage as ndi
 
 import config
-from extract import read_sites
+from pairs import read_sites
 
 # ---------------------------------------------------------------- classical segmentation
 
@@ -195,7 +195,7 @@ def trace_widths(mask: np.ndarray) -> dict:
 
 def _one(args):
     kind, name = args
-    img = tifffile.imread(config.OUT / "work/images" / kind / f"{name}.tif")
+    img = tifffile.imread(config.image(kind, name))
     mask = segment(img, kind)
     cv2.imwrite(str(config.out("work/labels", kind, f"{name}.png")), mask.astype(np.uint8) * 255)
     return {"kind": kind, "image": name, **trace_widths(mask)}

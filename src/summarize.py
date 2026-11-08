@@ -1,14 +1,11 @@
-"""Step 6: summary tables, figures and headline numbers from OUT/metrics.csv.
+"""Step 5: summary table and figures from OUT/metrics.csv; prints the agreement with Hitachi.
 
 Writes to OUT:
   summary_by_design.csv   medians per design width, and gaps per design gap
-  hitachi_check.csv       our post-etch CDs next to Hitachi's, per site
   figures/fig_*.png       CD vs design, edge movement, gap vs design, BinDev heatmap, Hitachi check
-  stats.json              headline numbers
 """
 
 import csv
-import json
 
 import matplotlib
 
@@ -75,7 +72,7 @@ def save(fig, name):
     plt.close(fig)
 
 
-def main() -> dict:
+def main() -> None:
     rows = list(csv.DictReader(open(config.OUT / "metrics.csv")))
     ok = [r for r in rows if r["pre_ok"] == "True" and r["post_ok"] == "True"]
     sep = [r for r in ok if r["pre_connected"] == "False" and r["post_connected"] == "False"]
@@ -103,34 +100,31 @@ def main() -> dict:
         w = csv.writer(f)
         for table in (table_w, table_g):
             w.writerow(table[0].keys())
-            w.writerows([[f"{v:.1f}" if isinstance(v, float) else v for v in r.values()] for r in table])
+            w.writerows([[f"{v:.{3 if k in ('cmp_dev_bindev', 'cmp_iou') else 1}f}" if isinstance(v, float) else v
+                          for k, v in r.items()] for r in table])
             w.writerow([])
 
-    # ---------- Hitachi check
+    # ---------- agreement with Hitachi (post-etch footprint CD vs Hitachi's line width, and gaps)
     hrows = [r for r in rows if r["post_ok"] == "True" and np.isfinite(num(r["hitachi_width_nm"]))]
-    with open(config.out("hitachi_check.csv"), "w", newline="") as f:
-        keys = ["chip", "col", "row", "post_image", "hitachi_width_nm", "post_v_cd", "post_h_cd", "hitachi_gap_nm", "post_gap"]
-        w = csv.writer(f)
-        w.writerow(keys)
-        w.writerows([[r.get(k, "") for k in keys] for r in hrows])
     hit = np.array(col(hrows, "hitachi_width_nm"))
     wd = np.array(col(hrows, "design_width_nm"))
+
+    def agreement(ours, theirs):
+        s = np.isfinite(ours) & np.isfinite(theirs)
+        d = ours[s] - theirs[s]
+        return {"offset": float(np.median(d)), "sd": float(1.4826 * np.median(np.abs(d - np.median(d)))),
+                "r": float(np.corrcoef(ours[s], theirs[s])[0, 1]), "s": s}
+
     hitachi = {}
     for t in ("v", "h"):
         ours = np.array(col(hrows, f"post_{t}_cd"))
-        s = np.isfinite(ours)
-        d = ours[s] - hit[s]
-        resid = lambda y: y - np.polyval(np.polyfit(wd[s], y, 1), wd[s])  # noqa: E731
-        hitachi[t] = {"n": int(s.sum()), "offset": float(np.median(d)),
-                      "robust_sd": float(1.4826 * np.median(np.abs(d - np.median(d)))),
-                      "r": float(np.corrcoef(ours[s], hit[s])[0, 1]),
-                      "residual_r": float(np.corrcoef(resid(ours[s]), resid(hit[s]))[0, 1])}
-    go, gh = np.array(col(hrows, "post_gap")), np.array(col(hrows, "hitachi_gap_nm"))
-    s = np.isfinite(go) & np.isfinite(gh) & (go > 0)
-    dg = go[s] - gh[s]
-    hitachi["gap"] = {"n": int(s.sum()), "offset": float(np.median(dg)),
-                      "robust_sd": float(1.4826 * np.median(np.abs(dg - np.median(dg)))),
-                      "r": float(np.corrcoef(go[s], gh[s])[0, 1])}
+        a = agreement(ours, hit)
+        # within-design-width correlation: the trace that tracks Hitachi best is the one Hitachi measured
+        resid = lambda y: y - np.polyval(np.polyfit(wd[a["s"]], y, 1), wd[a["s"]])  # noqa: E731
+        a["residual_r"] = float(np.corrcoef(resid(ours[a["s"]]), resid(hit[a["s"]]))[0, 1])
+        hitachi[t] = a
+    go = np.array(col(hrows, "post_gap"))
+    hitachi["gap"] = agreement(np.where(go > 0, go, np.nan), np.array(col(hrows, "hitachi_gap_nm")))
 
     # ---------- figures
     plt.rcParams.update({"font.family": "DejaVu Sans", "figure.facecolor": SURFACE, "savefig.facecolor": SURFACE})
@@ -139,21 +133,21 @@ def main() -> dict:
     for ax, t, name in ((axes[0], "v", "Vertical trace"), (axes[1], "h", "Horizontal trace")):
         style(ax, f"{name}: CD vs design width", "Design width (nm)", "CD (nm), median and IQR")
         ax.plot([130, 420], [130, 420], color=INK2, linewidth=1, linestyle=(0, (4, 3)))
-        ax.annotate("CD = design", (410, 410), xytext=(-4, 6), textcoords="offset points", ha="right", color=INK2, fontsize=8)
+        ax.annotate("design spec", (410, 410), xytext=(-4, 6), textcoords="offset points", ha="right", color=INK2, fontsize=8)
         series(ax, WIDTHS, by_w(f"post_{t}_cd"), C2, "Post-etch bottom", -3)
         series(ax, WIDTHS, by_w(f"pre_{t}_cd"), C1, "Pre-etch (resist)", 0)
         series(ax, WIDTHS, by_w(f"post_{t}_inner_cd"), C3, "Post-etch top", 3)
         ax.set_xticks(WIDTHS)
         ax.set_xlim(130, 470)
     axes[0].legend(loc="upper left", frameon=False, fontsize=8, labelcolor=INK)
-    save(fig, "fig_cd_vs_design.png")
+    save(fig, "width_comp.png")
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.2), sharey=True)
-    style(axes[0], "Bottom (footprint): edge movement per side", "Design width (nm)", "Outward movement (nm), median and IQR")
+    style(axes[0], "Bottom edge movement", "Design width (nm)", "Outward movement (nm), median and IQR")
     series(axes[0], WIDTHS, half("d_v_cd_bottom"), C1, "Vertical trace side", -4)
     series(axes[0], WIDTHS, half("d_h_cd_bottom"), C2, "Horizontal trace side", 0)
     series(axes[0], WIDTHS, by_w("d_tip_extension"), C3, "Tip (toward V)", 4)
-    style(axes[1], "Top: edge movement per side", "Design width (nm)", "")
+    style(axes[1], "Top edge movement", "Design width (nm)", "")
     series(axes[1], WIDTHS, half("d_v_cd_top"), C1, "Vertical trace side", -3)
     series(axes[1], WIDTHS, half("d_h_cd_top"), C2, "Horizontal trace side", 3)
     for ax in axes:
@@ -161,17 +155,17 @@ def main() -> dict:
         ax.set_xticks(WIDTHS)
         ax.set_xlim(130, 490)
     axes[0].legend(loc="center right", frameon=False, fontsize=8, labelcolor=INK)
-    save(fig, "fig_edge_shift.png")
+    save(fig, "width_edge_shift.png")
 
     fig, ax = plt.subplots(figsize=(6.2, 4.4))
-    style(ax, "Tip-to-line gap vs design gap", "Design gap (nm)", "Gap (nm), median and IQR")
+    style(ax, "Gap vs design gap", "Design gap (nm)", "Gap (nm), median and IQR")
     ax.plot([130, 420], [130, 420], color=INK2, linewidth=1, linestyle=(0, (4, 3)))
     series(ax, GAPS, by_g("pre_gap", sep), C1, "Pre-etch", -3)
     series(ax, GAPS, by_g("post_gap", sep), C2, "Post-etch (bottom)", 3)
     ax.set_xticks(GAPS)
     ax.set_xlim(130, 480)
     ax.legend(loc="upper left", frameon=False, fontsize=8, labelcolor=INK)
-    save(fig, "fig_gap_vs_design.png")
+    save(fig, "neck_comp.png")
 
     heat = np.array([[nanmed([num(r["cmp_dev_bindev"]) for r in ok if int(r["design_gap_nm"]) == g and int(r["design_width_nm"]) == w])
                       for w in WIDTHS] for g in GAPS])
@@ -193,7 +187,7 @@ def main() -> dict:
     cb = fig.colorbar(im, ax=ax, shrink=0.8)
     cb.outline.set_visible(False)
     cb.ax.tick_params(colors=INK2, labelsize=8, length=0)
-    save(fig, "fig_dev_heatmap.png")
+    save(fig, "dev_heatmap.png")
 
     fig, ax = plt.subplots(figsize=(6.2, 5))
     style(ax, "Post-etch footprint CD vs Hitachi CD-SEM", "Hitachi line width (nm)", "Our footprint CD (nm)")
@@ -204,24 +198,10 @@ def main() -> dict:
         ax.scatter(hit, col(hrows, f"post_{t}_cd"), s=22, color=c, edgecolors=SURFACE, linewidths=1,
                    label=f"{name}: offset {hitachi[t]['offset']:+.0f} nm, r={hitachi[t]['r']:.3f}")
     ax.legend(loc="upper left", frameon=False, fontsize=8, labelcolor=INK)
-    save(fig, "fig_hitachi.png")
+    save(fig, "hitachi_comp.png")
 
-    # ---------- headline numbers
-    dev = col(ok, "cmp_dev_bindev")
-    stats = {
-        "n_sites": len(rows), "n_both_ok": len(ok),
-        "not_measured": [{"kind": k, "image": r[f"{k}_image"], "why": r[f"{k}_why"]}
-                         for r in rows for k in ("pre", "post") if r[f"{k}_ok"] != "True"],
-        "necks_pre": sum(r["pre_connected"] == "True" for r in ok), "necks_post": sum(r["post_connected"] == "True" for r in ok),
-        "iou_vs_classical": {k: nanmed(col(rows, f"{k}_iou_vs_classical")) for k in ("pre", "post")},
-        "by_width": table_w, "by_gap": table_g, "hitachi": hitachi,
-        "dev_bindev": {"median": nanmed(dev), "q1": float(np.nanpercentile(dev, 25)), "q3": float(np.nanpercentile(dev, 75))},
-        "lwr_hitachi_median": nanmed(col(rows, "hitachi_lwr_3s_nm")),
-        "neck_width_pre": [nanmed(col(ok, "pre_neck_width")), float(np.nanmin(col(ok, "pre_neck_width"))), float(np.nanmax(col(ok, "pre_neck_width")))],
-        "neck_width_post": [nanmed(col(ok, "post_neck_width")), float(np.nanmin(col(ok, "post_neck_width"))), float(np.nanmax(col(ok, "post_neck_width")))],
-    }
-    json.dump(stats, open(config.out("stats.json"), "w"), indent=1)
-    v, h = hitachi["v"], hitachi["h"]
-    print(f"summarize: {len(ok)}/{len(rows)} sites measurable; Hitachi V r={v['r']:.3f} offset {v['offset']:+.1f} nm "
-          f"(SD {v['robust_sd']:.1f}), H r={h['r']:.3f} offset {h['offset']:+.1f} nm; BinDev median {stats['dev_bindev']['median']:.3f}")
-    return stats
+    print(f"summarize: {len(ok)}/{len(rows)} sites measurable; BinDev Dev median {nanmed(col(ok, 'cmp_dev_bindev')):.3f}")
+    for k, name in (("v", "vertical trace CD"), ("h", "horizontal trace CD"), ("gap", "gap")):
+        a = hitachi[k]
+        extra = f", within-width r={a['residual_r']:.2f}" if "residual_r" in a else ""
+        print(f"summarize: vs Hitachi, {name}: r={a['r']:.3f}, offset {a['offset']:+.1f} nm, SD {a['sd']:.1f} nm{extra}")

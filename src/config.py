@@ -10,10 +10,10 @@ PROJECT = ANALYZER.parent
 OUT = PROJECT / "analysisOutput" / "etch_W1"  # replaced by run.py -o
 
 # --- inputs (read only): Wafer 1, TGAP
-PRE_ZIP = PROJECT / "02_HitachiRun02_9waferProcess_preEtch/TGAP/TGAP_Part1.zip"
-PRE_FOLDER = "Jan20_W1"
-POST_ZIP = PROJECT / "03_HitachiRun03_9waferProcess-postETCH/TGAP/20200317_122851_01-TGAP_Mar20_W1P1.zip"
-POST_FOLDER = "Mar20_W1P1"
+IMAGES = {  # image folders (unzipped): *-02MS.tif, each with its *-02MS.tif_cnd/cond.txt
+    "pre": PROJECT / "02_HitachiRun02_9waferProcess_preEtch/TGAP/TGAP_Part1/20200121_195959_01-TGAP_Jan20_W1",
+    "post": PROJECT / "03_HitachiRun03_9waferProcess-postETCH/TGAP/20200317_122851_01-TGAP_Mar20_W1P1",
+}
 POST_MSR = PROJECT / "03_HitachiRun03_9waferProcess-postETCH/TGAP/MSR file/20200317_122851_01-TGAP_Mar20_W1P1.msr"
 DESIGN_MASKS = PROJECT / "02_HitachiRun02_9waferProcess_preEtch/TGAP/postprocesseddata_paired_Ziwang/PreEtch_9wafer_TGAP_ZiwangPairs/A"
 
@@ -31,6 +31,11 @@ def design(col: int, row: int) -> tuple[int, int]:
 
 # --- U-Net
 HOLDOUT_CHIP = "0,5"  # held out of training, to measure agreement on unseen sites
+
+
+def image(kind: str, name: str) -> Path:
+    """Path of an input image; kind is "pre" or "post", name e.g. "E04_M0002-02MS"."""
+    return IMAGES[kind] / f"{name}.tif"
 
 
 def out(*parts: str) -> Path:

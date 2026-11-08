@@ -1,15 +1,14 @@
-"""Step 5: segments every pre/post pair with the U-Net, measures both masks and compares them.
+"""Step 4: segments every pre/post pair with the U-Net, measures both masks and compares them.
 
 Writes to OUT:
-  masks/{pre,post}/<image>.png     U-Net footprint masks
+  work/masks/{pre,post}/<image>.png  U-Net footprint masks
   metrics.csv                      one row per site: pre features, post features, pre->post changes
-  overlays/chip_<chip>.png         per site: pre + outline (green) | post + outline (magenta) | both outlines
-  qa/seg_*.png                     classical (green) vs U-Net (magenta) masks: on the images whose classical
+  check/chip_<chip>.png            per site: pre + outline (green) | post + outline (magenta) | both outlines
+  check/seg_*.png                  classical (green) vs U-Net (magenta) masks: on the images whose classical
                                    mask failed QC, and on the held-out chip
 """
 
 import csv
-import json
 
 import cv2
 import numpy as np
@@ -55,9 +54,9 @@ def site_record(model, r: dict) -> tuple[dict, dict, dict]:
     imgs, masks, ms = {}, {}, {}
     for kind in ("pre", "post"):
         name = r[f"{kind}_image"]
-        img = tifffile.imread(config.OUT / "work/images" / kind / f"{name}.tif")
+        img = tifffile.imread(config.image(kind, name))
         mask = unet.predict(model, img)
-        cv2.imwrite(str(config.out("masks", kind, f"{name}.png")), mask.astype(np.uint8) * 255)
+        cv2.imwrite(str(config.out("work/masks", kind, f"{name}.png")), mask.astype(np.uint8) * 255)
         label = cv2.imread(str(config.OUT / "work/labels" / kind / f"{name}.png"), cv2.IMREAD_GRAYSCALE) > 0
         rec[f"{kind}_iou_vs_classical"] = float((mask & label).sum() / max((mask | label).sum(), 1))
         m = measure(mask)
@@ -84,23 +83,20 @@ def qa_sheets(pairs: list[dict]) -> None:
     in_pairs = {("pre", r["pre_image"]) for r in pairs} | {("post", r["post_image"]) for r in pairs}
     rejected = [(r["kind"], r["image"]) for r in read_qc() if r["ok"] != "True" and (r["kind"], r["image"]) in in_pairs]
     holdout = [(k, r[f"{k}_image"]) for r in pairs if r["chip"] == config.HOLDOUT_CHIP for k in ("pre", "post")][::3]
-    summary = {}
     for tag, items in (("classical_rejects", rejected), ("holdout_chip", holdout)):
         tiles, passed = [], 0
         for kind, name in items:
-            img = tifffile.imread(config.OUT / "work/images" / kind / f"{name}.tif")
+            img = tifffile.imread(config.image(kind, name))
             label = cv2.imread(str(config.OUT / "work/labels" / kind / f"{name}.png"), cv2.IMREAD_GRAYSCALE) > 0
-            mask = cv2.imread(str(config.OUT / "masks" / kind / f"{name}.png"), cv2.IMREAD_GRAYSCALE) > 0
+            mask = cv2.imread(str(config.OUT / "work/masks" / kind / f"{name}.png"), cv2.IMREAD_GRAYSCALE) > 0
             ok = trace_widths(mask)["ok"]
             passed += ok
             iou = (label & mask).sum() / max((label | mask).sum(), 1)
             tile = cv2.resize(outlines(img, [(label, GREEN), (mask, MAGENTA)]), (220, 220), interpolation=cv2.INTER_AREA)
             tiles.append(labelled(tile, f"{kind} {name[:9]} QC {'pass' if ok else 'FAIL'} IoU {iou:.2f}"))
         if tiles:
-            save_rgb(f"qa/seg_{tag}.png", grid(tiles, 6))
-        summary[tag] = {"images": len(items), "unet_passes_qc": int(passed)}
+            save_rgb(f"check/seg_{tag}.png", grid(tiles, 6))
         print(f"analyze: {tag}: {len(items)} images, U-Net mask passes QC on {passed}")
-    json.dump(summary, open(config.out("qa/qa.json"), "w"), indent=1)
 
 
 def main() -> None:
@@ -129,7 +125,7 @@ def main() -> None:
         w.writeheader()
         w.writerows(rows)
     for chip, items in tiles.items():
-        save_rgb(f"overlays/chip_{chip.replace(',', '_')}.png", grid([t for _, t in sorted(items, key=lambda x: x[0])], 6))
+        save_rgb(f"check/chip_{chip.replace(',', '_')}.png", grid([t for _, t in sorted(items, key=lambda x: x[0])], 6))
     print(f"analyze: U-Net from step {ck['step']}; {len(rows)} sites; measurable pre "
           f"{sum(r['pre_ok'] for r in rows)}, post {sum(r['post_ok'] for r in rows)}")
     qa_sheets(pairs)

@@ -6,8 +6,8 @@ Usage (from the folder holding etchAnalyzer, or anywhere):
   etchAnalyzer/.venv/bin/python -I etchAnalyzer/src/run.py --force         # every step, again
   ... run.py -o DIR                                                        # write to DIR instead
 
-Steps, in order: extract, pairs, labels, train, analyze, summarize.
-Training takes about 40 minutes on the CPU and is skipped while OUT/model/unet.pt exists.
+Steps, in order: pairs, labels, train, analyze, summarize.
+Training takes about 40 minutes on the CPU and is skipped while OUT/work/model/unet.pt exists.
 """
 
 import argparse
@@ -20,12 +20,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I leaves the script
 import config  # noqa: E402
 
 STEPS = {  # step: (module, output that marks it done)
-    "extract": ("extract", "work/sites.csv"),
-    "pairs": ("pairs", "pairs.csv"),
+    "pairs": ("pairs", "work/pairs.csv"),
     "labels": ("labels", "work/labels_qc.csv"),
-    "train": ("train", "model/unet.pt"),
+    "train": ("train", "work/model/unet.pt"),
     "analyze": ("analyze", "metrics.csv"),
-    "summarize": ("summarize", "stats.json"),
+    "summarize": ("summarize", "summary_by_design.csv"),
 }
 
 

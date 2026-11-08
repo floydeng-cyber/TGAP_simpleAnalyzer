@@ -1,4 +1,4 @@
-"""Step 6: features and dimensions of a TGAP footprint mask, and the pre/post shape comparison.
+"""Used by step 4: features and dimensions of a TGAP footprint mask, and the pre/post shape comparison.
 
 A TGAP site: a horizontal trace (H) entering from the left edge, a vertical trace (V) to its right, and a
 designed tip-to-line gap between them, which a neck may bridge. All lengths in nm.
@@ -176,19 +176,20 @@ def measure(mask: np.ndarray) -> dict:
 
 
 def align(pre: np.ndarray, post: np.ndarray) -> tuple[int, int, float]:
-    """Translation (dy, dx) of post onto pre maximizing pixel agreement (XNOR count), and that agreement."""
-    a = pre.astype(np.float32) * 2 - 1
-    b = post.astype(np.float32) * 2 - 1
-    # correlation of +-1 images = agreements - disagreements; FFT over a padded field
-    P = 512 + 2 * MAX_SHIFT
-    A = np.fft.rfft2(np.pad(a, MAX_SHIFT), s=(P, P))
-    B = np.fft.rfft2(np.pad(b, MAX_SHIFT), s=(P, P))
-    corr = np.fft.irfft2(A * np.conj(B), s=(P, P))
-    corr = np.fft.fftshift(corr)
-    c = P // 2
-    win = corr[c - MAX_SHIFT:c + MAX_SHIFT + 1, c - MAX_SHIFT:c + MAX_SHIFT + 1]
-    dy, dx = np.unravel_index(np.argmax(win), win.shape)
-    return int(dy - MAX_SHIFT), int(dx - MAX_SHIFT), float(win.max())
+    """Shift (dy, dx) of post onto pre, within MAX_SHIFT, maximizing pixel agreement over pre's central window.
+
+    The window excludes a MAX_SHIFT margin, so every shift compares the same number of pixels; post is
+    extended by its edge pixels, exactly as shift() does. Among equally good shifts, the smallest is taken.
+    Returns the shift and its agreement (fraction of the window's pixels that match).
+    """
+    m = MAX_SHIFT
+    window = pre[m:-m, m:-m].astype(np.float32) * 2 - 1
+    search = np.pad(post, m, mode="edge").astype(np.float32)[m:3 * m + window.shape[0], m:3 * m + window.shape[1]] * 2 - 1
+    score = cv2.matchTemplate(search, window, cv2.TM_CCORR)  # sum of +-1 products: matches - mismatches
+    dys, dxs = np.nonzero(score >= score.max() - 0.5)
+    k = np.argmin((m - dys) ** 2 + (m - dxs) ** 2)  # score index i means shift m - i
+    agreement = (score[dys[k], dxs[k]] / window.size + 1) / 2
+    return int(m - dys[k]), int(m - dxs[k]), float(agreement)
 
 
 def shift(mask: np.ndarray, dy: int, dx: int) -> np.ndarray:

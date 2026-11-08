@@ -1,10 +1,14 @@
-"""Step 2: pairs each pre-etch site with its post-etch image, with design values and Hitachi results.
+"""Step 1: indexes the images by site, then pairs each pre-etch site with its post-etch image, with design
+values and Hitachi results.
+
+A site is (chip, col, row): the chip number and the cell on the chip's 6x6 grid of test structures, read
+from each image's cond.txt (chip coordinates in um, 50 um pitch, counted from the run's smallest one).
 
 Pairs are matched by site (chip, col, row), not by file name: in these two runs the same file name
 names different sites. Design width/gap follow config.design(); the rule is checked against every
 layout mask in the paired set. Hitachi values come from the post-etch .msr file.
 
-Writes OUT/pairs.csv.
+Writes OUT/work/sites.csv (every image's site) and OUT/work/pairs.csv.
 """
 
 import csv
@@ -16,7 +20,35 @@ import numpy as np
 from PIL import Image
 
 import config
-from extract import read_sites
+
+
+def index_sites() -> list[dict]:
+    """Every -02MS.tif of both runs with its chip, chip coordinate (um) and grid cell (col, row)."""
+    sites = []
+    for kind, folder in config.IMAGES.items():
+        run = []
+        for cond in sorted(folder.glob("*-02MS.tif_cnd/cond.txt")):
+            name = cond.parent.name[: -len(".tif_cnd")]
+            if not config.image(kind, name).exists():
+                continue
+            text = cond.read_text(errors="replace")
+            chip = re.search(r"Chip_number\s+(\S+)", text).group(1)
+            cx, cy = map(int, re.search(r"Chip_coordinate\s+(\d+) um, (\d+) um", text).groups())
+            run.append({"kind": kind, "image": name, "chip": chip, "cx": cx, "cy": cy})
+        x0, y0 = min(s["cx"] for s in run), min(s["cy"] for s in run)
+        for s in run:
+            s["col"] = round((s["cx"] - x0) / config.CELL_PITCH_UM)
+            s["row"] = round((s["cy"] - y0) / config.CELL_PITCH_UM)
+        sites += run
+    with open(config.out("work/sites.csv"), "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["kind", "image", "chip", "cx", "cy", "col", "row"])
+        w.writeheader()
+        w.writerows(sites)
+    return [{k: str(v) for k, v in s.items()} for s in sites]
+
+
+def read_sites() -> list[dict]:
+    return list(csv.DictReader(open(config.OUT / "work/sites.csv")))
 
 
 def _runs(line: np.ndarray) -> list[tuple[int, int]]:
@@ -73,7 +105,7 @@ def read_msr(path) -> dict[str, dict]:
 
 
 def main() -> None:
-    sites = read_sites()
+    sites = index_sites()
     post_at = defaultdict(list)
     for s in sites:
         if s["kind"] == "post":
@@ -96,14 +128,15 @@ def main() -> None:
         print(f"WARNING: {disagree} layout masks disagree with the design rule", file=sys.stderr)
     cols = ["chip", "col", "row", "design_width_nm", "design_gap_nm", "pre_image", "post_image", "hitachi_p_no",
             "hitachi_width_nm", "hitachi_gap_nm", "hitachi_lwr_3s_nm", "hitachi_ler_left_3s_nm", "hitachi_ler_right_3s_nm"]
-    with open(config.out("pairs.csv"), "w", newline="") as f:
+    with open(config.out("work/pairs.csv"), "w", newline="") as f:
         wr = csv.DictWriter(f, fieldnames=cols)
         wr.writeheader()
         wr.writerows(rows)
-    print(f"pairs: {sum(bool(r['post_image']) for r in rows)}/{len(rows)} paired; design rule checked on "
+    print(f"pairs: images pre {sum(s['kind'] == 'pre' for s in sites)}, post {sum(s['kind'] == 'post' for s in sites)}; "
+          f"{sum(bool(r['post_image']) for r in rows)}/{len(rows)} paired; design rule checked on "
           f"{checked} layout masks, {disagree} disagree; Hitachi values for "
           f"{sum(r.get('hitachi_width_nm', '') != '' for r in rows)} sites")
 
 
 def read_pairs() -> list[dict]:
-    return list(csv.DictReader(open(config.OUT / "pairs.csv")))
+    return list(csv.DictReader(open(config.OUT / "work/pairs.csv")))
