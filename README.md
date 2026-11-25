@@ -1,72 +1,60 @@
-# etchAnalyzer
+# in-Python port
 
-Compares pre-etch and post-etch CD-SEM images of Wafer 1 (TGAP)
-- Segment:  u-net
-- Measure:  critical dimensions, gap/neck
-- Quantify: change through etch
-- Check:    post-etch against Hitachi's measurements
-
-## Where to put input data
-
-Put data folders next to `etchAnalyzer`, under in the same folder:
-
+## Python syntax
+```python
+import sys
+sys.path.insert(0, "path/to/etchAnalyzer-hitachi/src")
+from hitachi import width, gap, d_width, d_gap
 ```
-<folder>/
-├── etchAnalyzer/
-├── 02_HitachiRun02_9waferProcess_preEtch/TGAP/
-│   ├── TGAP_Part1/20200121_195959_01-TGAP_Jan20_W1/    (pre-etch images, unzipped)
-│   └── postprocesseddata_paired_Ziwang/...             (layout masks)
-└── 03_HitachiRun03_9waferProcess-postETCH/TGAP/
-    ├── 20200317_122851_01-TGAP_Mar20_W1P1/              (post-etch images, unzipped)
-    └── MSR file/20200317_122851_01-TGAP_Mar20_W1P1.msr  (Hitachi results)
+
+| Function | Returns |
+|---|---|
+| `width(structure, wafer, chip, row, col, kind)` | number
+| `gap(structure, wafer, chip, row, col, kind)` | number
+| `d_width(structure, wafer, chip, row, col)` | Δpost-pre
+| `d_gap(structure, wafer, chip, row, col)` | Δpost-pre
+
+# Python example
+
+```python
+>>> width("TGAP", 1, "0,0", 4, 4)
+255.51 nm
+>>> width("TGAP", 1, "0,0", 4, 4, kind="post")
+533.47 nm
+>>> gap("TGAP", 1, "0,0", 4, 4)
+370.97 nm
+>>> d_width("TGAP", 1, "0,0", 4, 4)
+277.96 nm
+>>> d_gap("TGAP", 1, "0,0", 4, 4)
+-174.9 nm
 ```
-Images are read in place, never copied or changed.
-To use other locations, edit the paths at top of `src/config.py`.
 
-## Run
-Once, from `<folder>`:
 
+# csv-output port
 ```bash
-python3 -m venv etchAnalyzer/.venv
+python3 src/hitachi.py [STRUCTURE] [WAFER] [--kind pre|post] [--chip X,Y] [--row R] [--col C] [--change] [--fields]
 ```
 
-```bash
-etchAnalyzer/.venv/bin/pip install -r etchAnalyzer/requirements.txt
+| Parameter | Values |
+|---|---|
+| `STRUCTURE` | TGAP DTGAP TTGAP UL ETE TETE FLG TCL |
+| `WAFER` | 1 2 3 4 5 6 7 8 9 |
+| `--kind` | pre post | pre-etch, post-etch
+| `--chip` | -4,0 0,-5 0,0 0,5 4,0 | chip_number (x,y)
+| `--row` | 1 2 3 4 5 6 | row_in_chip
+| `--col` | 1 2 3 4 5 6 | column_in_chip
+| `--change` | --change | to show Δpost-pre
+| `--fields` | width gap x_um y_um |
+
+## Example
+
 ```
+$ python3 src/hitachi.py TGAP 1 --chip 0,0 --row 4 --col 4
+structure,wafer,kind,chip,grid_col,grid_row,x_um,y_um,width,gap
+TGAP,1,pre,"0,0",4,4,4408.0,2706.0,255.51,370.97
+TGAP,1,post,"0,0",4,4,4414.0,2693.0,533.47,196.07
 
-Then:
-
-```bash
-etchAnalyzer/.venv/bin/python -I etchAnalyzer/src/run.py
+$ python3 src/hitachi.py TGAP 1 --chip 0,0 --row 4 --col 4 --change
+structure,wafer,chip,grid_col,grid_row,pre_width,post_width,d_width,pre_gap,post_gap,d_gap
+TGAP,1,"0,0",4,4,255.51,533.47,277.96,370.97,196.07,-174.9
 ```
-
-runs the program automatically.
-
-## What happens
-
-Everything is written to `<folder>/analysisOutput/etch_W1/`. Each step prints one or two lines.
-
-| Step | Time | Writes |
-|---|---|---|
-| `pairs` | seconds | `work/sites.csv`: chip and cell of each image; `work/pairs.csv`: each pre-etch site with its post-etch image, design width/gap, Hitachi values |
-| `labels` | ~1 min | `work/labels/`: classical masks used to train the U-Net; `work/labels_qc.csv`: which masks are clean |
-| `train` | ~40 min (CPU) | `work/model/unet.pt`, `work/model/train_log.csv`. Skipped while `work/model/unet.pt` exists. |
-| `analyze` | ~7 min | `work/masks/`, `metrics.csv`, `check/chip_*.png`, `check/seg_*.png` |
-| `summarize` | seconds | `summary_by_design.csv`, `figures/fig_*.png`; prints the agreement with Hitachi |
-
-The analysis includes:
-- **`metrics.csv`:** one row per site, with pre-etch, post-etch and change values.
-- **`check/chip_*.png`:** each image with its outlines, for checking by eye.
-- **`check/seg_*.png`:** the U-Net masks against the classical ones.
-
-The summary includes:
-- **`summary_by_design.csv`:** medians per design width and gap.
-- **`figures/`:** CD vs design, edge movement, gap, BinDev heatmap, and our post-etch CD vs Hitachi's.
-
-Columns in `metrics.csv`:
-- **`pre_*` / `post_*`:** one image's features.
-- **`d_*`:** change through etch.
-- **`cmp_*`:** shape comparison.
-- **`hitachi_*`:** Hitachi's values.
-
-All lengths are in nm (3.904 nm per pixel).
